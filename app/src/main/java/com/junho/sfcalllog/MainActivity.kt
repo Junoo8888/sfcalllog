@@ -126,6 +126,45 @@ class MainActivity : Activity() {
             }, Ui.lp(c, Ui.MATCH, Ui.dp(c, 48), 8))
         }
 
+        // ④ 통화 내용 AI 요약
+        val aCard = card(body, "④ 통화 내용 AI 요약 (화자 구분)")
+        aCard.addView(Ui.text(c, "갤럭시 통화 녹음 → 나/고객 대화록 + 요약 → 세포 메모에 자동 입력", 13f, Ui.SUB))
+        val audioPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+        permRow(aCard, "통화 녹음 파일 읽기", granted(audioPerm)) {
+            requestPermissions(arrayOf(audioPerm), 3)
+        }
+        val gKey = input("Gemini API 키", prefs.geminiKey, secret = true)
+        aCard.addView(gKey, Ui.lp(c, Ui.MATCH, Ui.WRAP, 10))
+        val gModel = input("모델 (비워두면 자동 선택)", prefs.geminiModel, secret = false)
+        aCard.addView(gModel, Ui.lp(c, Ui.MATCH, Ui.WRAP, 8))
+        if (prefs.geminiAutoModel.isNotEmpty() && prefs.geminiModel.isEmpty()) {
+            aCard.addView(Ui.text(c, "자동 선택된 모델: ${prefs.geminiAutoModel}", 12f, Ui.SUB), Ui.lp(c, Ui.MATCH, Ui.WRAP, 4))
+        }
+        val aiSw = Switch(c).apply {
+            text = "통화 끝나면 AI 요약 켜기"
+            textSize = 15f
+            isChecked = prefs.aiEnabled
+            setOnCheckedChangeListener { _, on -> prefs.aiEnabled = on }
+        }
+        aCard.addView(aiSw, Ui.lp(c, Ui.MATCH, Ui.WRAP, 10))
+        aCard.addView(Ui.button(c, "저장하고 연결 테스트") { btn ->
+            prefs.geminiKey = gKey.text.toString()
+            prefs.geminiModel = gModel.text.toString()
+            if (prefs.geminiKey.isEmpty()) { toast("Gemini API 키를 입력해주세요"); return@button }
+            btn.isEnabled = false
+            java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+                val msg = try {
+                    val m = CallSummarizer.testKey(this)
+                    prefs.aiEnabled = true
+                    "✓ 연결 성공 · 모델 $m"
+                } catch (e: Exception) {
+                    "연결 실패: ${e.message}"
+                }
+                runOnUiThread { toast(msg); render() }
+            }
+        }, Ui.lp(c, Ui.MATCH, Ui.dp(c, 48), 10))
+
         intent?.getStringExtra("loginMessage")?.let {
             body.addView(Ui.text(c, it, 13f, if (it.contains("실패")) Ui.RED else Ui.GREEN), Ui.lp(c, Ui.MATCH, Ui.WRAP, 16))
         }

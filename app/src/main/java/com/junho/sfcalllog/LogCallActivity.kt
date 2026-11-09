@@ -47,6 +47,15 @@ class LogCallActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var saveBtn: View
 
+    private lateinit var aiBox: LinearLayout
+    private lateinit var aiStatus: TextView
+    private lateinit var transcriptView: TextView
+    private lateinit var transcriptToggle: TextView
+    private lateinit var saveTranscriptBox: android.widget.CheckBox
+    private var aiJob: SummaryJob? = null
+    private var autoMemo: String = ""
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+
     private var candidates: List<Candidate> = emptyList()
     private var selected: Candidate? = null
     private var saving = false
@@ -66,8 +75,9 @@ class LogCallActivity : Activity() {
             listTitle.text = "로그인 필요"
             return
         }
-        if (info.durationSec <= 0 && info.outgoing) memo.setText("부재중")
+        if (info.durationSec <= 0 && info.outgoing) setAutoMemo("부재중")
         loadByPhone()
+        startAi()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -125,6 +135,39 @@ class LogCallActivity : Activity() {
         searchRow.addView(Ui.button(c, "검색", primary = false) { runNameSearch() },
             LinearLayout.LayoutParams(Ui.WRAP, Ui.dp(c, 48)).apply { leftMargin = Ui.dp(c, 8) })
         body.addView(searchRow, Ui.lp(c, Ui.MATCH, Ui.WRAP, 12))
+
+        // AI 통화 요약
+        aiBox = Ui.vbox(c, 14).apply {
+            background = Ui.rounded(c, 0xFFF4F8FF.toInt(), 14, 0xFFD6E6FF.toInt())
+            visibility = View.GONE
+        }
+        aiBox.addView(Ui.text(c, "🤖 통화 내용 AI 요약", 15f, Ui.BLUE, bold = true))
+        aiStatus = Ui.text(c, "", 14f, Ui.SUB)
+        aiBox.addView(aiStatus, Ui.lp(c, Ui.MATCH, Ui.WRAP, 4))
+        transcriptToggle = Ui.text(c, "▸ 대화록 보기", 14f, Ui.BLUE).apply {
+            visibility = View.GONE
+            setPadding(0, Ui.dp(c, 8), 0, 0)
+            setOnClickListener {
+                val show = transcriptView.visibility != View.VISIBLE
+                transcriptView.visibility = if (show) View.VISIBLE else View.GONE
+                text = if (show) "▾ 대화록 접기" else "▸ 대화록 보기"
+            }
+        }
+        aiBox.addView(transcriptToggle)
+        transcriptView = Ui.text(c, "", 13f, Ui.TEXT).apply {
+            visibility = View.GONE
+            setTextIsSelectable(true)
+        }
+        aiBox.addView(transcriptView, Ui.lp(c, Ui.MATCH, Ui.WRAP, 6))
+        saveTranscriptBox = android.widget.CheckBox(c).apply {
+            text = "대화록도 세포에 함께 저장"
+            textSize = 13f
+            isChecked = Prefs(c).saveTranscript
+            visibility = View.GONE
+            setOnCheckedChangeListener { _, on -> Prefs(c).saveTranscript = on }
+        }
+        aiBox.addView(saveTranscriptBox, Ui.lp(c, Ui.MATCH, Ui.WRAP, 4))
+        body.addView(aiBox, Ui.lp(c, Ui.MATCH, Ui.WRAP, 24))
 
         // 결과 빠른 선택
         body.addView(Ui.text(c, "통화 결과", 16f, Ui.TEXT, bold = true), Ui.lp(c, Ui.MATCH, Ui.WRAP, 24))
@@ -209,6 +252,49 @@ class LogCallActivity : Activity() {
             ?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
     }
 
+    // ───────────── AI 요약 ─────────────
+
+    private fun setAutoMemo(text: String) {
+        autoMemo = text
+        memo.setText(text)
+        memo.setSelection(memo.text.length)
+    }
+
+    private fun startAi() {
+        if (!CallSummarizer.isReady(this)) return
+        aiJob = CallSummarizer.get(info) ?: CallSummarizer.start(this, info)
+        if (aiJob == null) return            // 연결 안 된 통화 등
+        aiBox.visibility = View.VISIBLE
+        pollAi()
+    }
+
+    private fun pollAi() {
+        val job = aiJob ?: return
+        if (isFinishing || isDestroyed) return
+        if (!job.done) {
+            aiStatus.text = job.status
+            ui.postDelayed({ pollAi() }, 800)
+            return
+        }
+        val r = job.result
+        if (r == null) {
+            aiStatus.text = job.error ?: "요약 실패"
+            aiStatus.setTextColor(Ui.RED)
+            return
+        }
+        aiStatus.text = "✓ 요약 완료 — 아래 메모에 넣었어요. 고칠 부분만 고치세요."
+        aiStatus.setTextColor(Ui.GREEN)
+        // 사용자가 메모를 직접 쓰고 있었다면 덮어쓰지 않고 뒤에 붙임
+        val cur = memo.text.toString()
+        if (cur == autoMemo || cur.isBlank()) setAutoMemo(r.memo())
+        else memo.setText(cur.trimEnd() + "\n\n" + r.memo())
+        if (r.transcript.isNotEmpty()) {
+            transcriptView.text = r.transcriptText()
+            transcriptToggle.visibility = View.VISIBLE
+            saveTranscriptBox.visibility = View.VISIBLE
+        }
+    }
+
     // ───────────── 검색 ─────────────
 
     private fun loadByPhone() {
@@ -291,7 +377,10 @@ class LogCallActivity : Activity() {
             showStatus("먼저 위 목록에서 기록할 리드를 눌러 선택해주세요.", Ui.RED)
             return
         }
-        val description = memo.text.toString().trim()
+        val transcript = aiJob?.result?.takeIf { saveTranscriptBox.isChecked && it.transcript.isNotEmpty() }
+            ?.transcriptText()
+        val description = (memo.text.toString().trim() +
+            (if (transcript != null) "\n\n--- 통화 대화록 (AI 자동 작성) ---\n$transcript" else "")).take(31000)
         saving = true
         saveBtn.isEnabled = false
         progress.visibility = View.VISIBLE

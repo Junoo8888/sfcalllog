@@ -31,6 +31,8 @@ object OverlayPrompt {
     @Volatile var cachedCandidates: List<Candidate>? = null
 
     fun show(ctx: Context, info: CallInfo) {
+        // 통화 내용 AI 요약은 팝업이 뜨는 동시에 미리 시작 (기록하기 누를 때쯤 완료되도록)
+        try { CallSummarizer.start(ctx, info) } catch (_: Exception) { }
         if (!Settings.canDrawOverlays(ctx)) {
             Notifier.notifyCall(ctx, info)
             return

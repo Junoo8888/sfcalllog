@@ -54,6 +54,28 @@ class Prefs(context: Context) {
         get() = sp.getString("lastCallState", "IDLE") ?: "IDLE"
         set(v) = sp.edit().putString("lastCallState", v).commit().let { }
 
+    // ── 통화 내용 AI 요약 ──
+    var aiEnabled: Boolean
+        get() = sp.getBoolean("aiEnabled", false)
+        set(v) = sp.edit().putBoolean("aiEnabled", v).apply()
+
+    var geminiKey: String
+        get() = sp.getString("geminiKey", "") ?: ""
+        set(v) = sp.edit().putString("geminiKey", v.trim()).apply()
+
+    /** 비워두면 자동 선택 */
+    var geminiModel: String
+        get() = sp.getString("geminiModel", "") ?: ""
+        set(v) = sp.edit().putString("geminiModel", v.trim()).apply()
+
+    var geminiAutoModel: String
+        get() = sp.getString("geminiAutoModel", "") ?: ""
+        set(v) = sp.edit().putString("geminiAutoModel", v).apply()
+
+    var saveTranscript: Boolean
+        get() = sp.getBoolean("saveTranscript", true)
+        set(v) = sp.edit().putBoolean("saveTranscript", v).apply()
+
     var ignoredNumbers: Set<String>
         get() = sp.getStringSet("ignored", emptySet())?.toSet() ?: emptySet()
         set(v) = sp.edit().putStringSet("ignored", v).apply()
