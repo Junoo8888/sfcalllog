@@ -46,7 +46,9 @@ object OverlayPrompt {
             elevation = Ui.dp(c, 12).toFloat()
         }
         val kind = if (info.outgoing) "발신" else "수신"
-        card.addView(Ui.text(c, "📞 $kind · ${Phone.hyphen(info.number)} · ${Ui.duration(info.durationSec)}", 13f, Ui.SUB))
+        val contact = ContactLookup.name(ctx, info.number)
+        val who = contact ?: Phone.hyphen(info.number)
+        card.addView(Ui.text(c, "📞 $kind · $who · ${Ui.duration(info.durationSec)}", 13f, Ui.SUB))
         val matchLine = Ui.text(c, "세포에서 찾는 중…", 17f, Ui.TEXT, bold = true)
         card.addView(matchLine, Ui.lp(c, Ui.MATCH, Ui.WRAP, 6))
         card.addView(Ui.text(c, "세일즈포스에 기록할까요?", 15f, Ui.SUB), Ui.lp(c, Ui.MATCH, Ui.WRAP, 2))
@@ -108,6 +110,7 @@ object OverlayPrompt {
                     cachedNumber = info.number
                     cachedCandidates = found
                     when {
+                        found.isEmpty() && contact != null -> "번호 매칭 없음 · 연락처 '$contact'로 찾을게요"
                         found.isEmpty() -> "세포에 없는 번호예요"
                         found.size == 1 -> "${found[0].title} · ${found[0].personName.ifEmpty { found[0].type }}"
                         else -> "${found[0].title} 외 ${found.size - 1}건"

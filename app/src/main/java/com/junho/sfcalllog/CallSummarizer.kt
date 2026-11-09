@@ -18,7 +18,9 @@ data class CallSummary(
     val summary: String,
     val result: String,
     val nextAction: String,
-    val transcript: List<Pair<String, String>>   // (화자, 말)
+    val transcript: List<Pair<String, String>>,   // (화자, 말)
+    val brand: String = "",
+    val customerName: String = ""
 ) {
     /** 세포 '설명' 칸 맨 위에 들어갈 메모 */
     fun memo(): String = buildString {
@@ -32,6 +34,8 @@ data class CallSummary(
 
 /** 통화 1건의 요약 작업 상태 */
 class SummaryJob {
+    val startedAt: Long = System.currentTimeMillis()
+    @Volatile var finishedAt: Long = 0L
     @Volatile var status: String = "통화 녹음 파일 찾는 중…"
     @Volatile var done: Boolean = false
     @Volatile var result: CallSummary? = null
@@ -68,12 +72,13 @@ object CallSummarizer {
                 if (rec == null) {
                     job.error = "통화 녹음 파일을 못 찾았어요. 갤럭시 '통화 자동 녹음'이 켜져 있는지, 앱의 '오디오 읽기' 권한이 있는지 확인해주세요."
                 } else {
-                    job.status = "AI가 통화 내용 정리 중… (보통 10~30초)"
+                    job.status = if (Prefs(app).saveTranscript) "AI가 대화록 + 요약 작성 중…" else "AI가 통화 요약 중…"
                     job.result = summarize(app, rec)
                 }
             } catch (e: Exception) {
                 job.error = "AI 요약 실패: ${e.message}"
             } finally {
+                job.finishedAt = System.currentTimeMillis()
                 job.done = true
             }
         }
@@ -87,10 +92,10 @@ object CallSummarizer {
     private data class Recording(val uri: Uri, val name: String, val mime: String, val size: Long)
 
     private fun waitForRecording(ctx: Context, info: CallInfo, job: SummaryJob): Recording? {
-        repeat(12) { i ->                     // 저장·인덱싱이 늦을 수 있어 최대 약 30초 대기
+        repeat(30) { i ->                     // 저장·인덱싱이 늦을 수 있어 1초 간격, 최대 30초 대기
             findRecording(ctx, info)?.let { return it }
-            job.status = "통화 녹음 파일 찾는 중… (${i + 1})"
-            Thread.sleep(2500)
+            job.status = "통화 녹음 파일 찾는 중… (${i + 1}초)"
+            Thread.sleep(1000)
         }
         return null
     }
@@ -135,23 +140,30 @@ object CallSummarizer {
 
     // ───────────── 2) Gemini로 대화록 + 요약 ─────────────
 
-    private fun prompt(): String = """
+    private fun prompt(withTranscript: Boolean): String {
+        val transcriptRule = if (withTranscript)
+            "\"transcript\": [{\"speaker\": \"나\" 또는 \"고객\", \"text\": \"말한 내용\"}],"
+        else
+            "\"transcript\": [],   ← 대화록은 쓰지 말 것 (속도 우선, 반드시 빈 배열)"
+        return """
 이 음성은 아임웹(웹사이트 빌더·자사몰 구축 플랫폼) 브랜드전략팀 SDR '나'와 잠재 고객(브랜드·쇼핑몰 담당자) '고객'의 전화 통화 녹음입니다.
-화자는 2명입니다. 아임웹 쪽 사람을 "나", 상대방을 "고객"으로 구분하세요.
+화자는 2명입니다. 아임웹 쪽 사람을 "나", 상대방을 "고객"으로 구분해서 이해하세요.
 
-반드시 아래 JSON 형식으로만 답하세요.
+반드시 아래 JSON 형식으로만, 짧고 빠르게 답하세요.
 {
-  "transcript": [{"speaker": "나" 또는 "고객", "text": "말한 내용"}],
-  "summary": "세일즈포스 활동 기록용 요약 2~5줄. 고객의 현재 상황(사용 중인 플랫폼, 운영 방식, 고민), 관심도, 결정권자 여부, 합의된 사항을 사실 위주로. 통화에 없는 내용은 쓰지 말 것",
+  "brand": "고객의 회사명 또는 브랜드명 (통화에서 들린 그대로, 모르면 빈 문자열)",
+  "customer_name": "고객 이름·직함 (들린 경우만, 모르면 빈 문자열)",
+  "summary": "세일즈포스 활동 기록용 요약 2~4줄. 고객 현재 상황(사용 중인 플랫폼, 운영 방식, 고민), 관심도, 결정권자 여부, 합의 사항을 사실 위주로. 통화에 없는 내용은 쓰지 말 것",
   "result": "다음 중 하나: 부재중 / 타겟 아님, 퀄리파잉 탈락 / 퀄리파잉 탈락 / 기 어레인지 건 / 후속 연락 예정 / 미팅 어레인지 / 담당자 연결 요청 / 자료 발송 요청 / 기타",
-  "next_action": "합의된 다음 액션과 날짜(없으면 빈 문자열)"
+  "next_action": "합의된 다음 액션과 날짜 (없으면 빈 문자열)",
+  $transcriptRule
 }
 
 규칙:
-- 대화록은 실제 말한 내용 그대로, 맞춤법만 자연스럽게.
-- 연결음·안내멘트·음성사서함뿐이면 result는 "부재중", transcript는 빈 배열.
-- 금액·날짜·이름 등 고유명사는 들린 그대로 적고, 불확실하면 (불확실) 표시.
+- 연결음·안내멘트·음성사서함뿐이면 result는 "부재중", summary는 "부재중".
+- 금액·날짜·이름 등 고유명사는 들린 그대로, 불확실하면 (불확실) 표시.
 """.trimIndent()
+    }
 
     private fun summarize(ctx: Context, rec: Recording): CallSummary {
         val prefs = Prefs(ctx)
@@ -160,34 +172,57 @@ object CallSummarizer {
         val bytes = ctx.contentResolver.openInputStream(rec.uri)?.use { it.readBytes() }
             ?: throw IllegalStateException("녹음 파일을 열 수 없어요")
 
+        val withTranscript = prefs.saveTranscript
         val mimes = linkedSetOf(normalizeMime(rec.mime, rec.name), "audio/mp4", "audio/m4a", "audio/aac")
         var lastErr: Exception? = null
-        for (mime in mimes) {
+        var useThinkingCfg = true
+        var uploadedUri: String? = null
+        var attempts = 0
+        val mimeList = mimes.toMutableList()
+        var mi = 0
+        while (mi < mimeList.size && attempts < 6) {
+            attempts++
+            val mime = mimeList[mi]
             try {
                 val audioPart = if (bytes.size <= INLINE_LIMIT) {
                     JSONObject().put("inline_data", JSONObject()
                         .put("mime_type", mime)
                         .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)))
                 } else {
-                    val uri = uploadFile(key, bytes, mime)
+                    val uri = uploadedUri ?: uploadFile(key, bytes, mime).also { uploadedUri = it }
                     JSONObject().put("file_data", JSONObject().put("mime_type", mime).put("file_uri", uri))
                 }
+                val gen = JSONObject()
+                    .put("responseMimeType", "application/json")
+                    .put("temperature", 0.2)
+                if (useThinkingCfg) thinkingConfig(model)?.let { gen.put("thinkingConfig", it) }
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject()
                         .put("role", "user")
-                        .put("parts", JSONArray().put(audioPart).put(JSONObject().put("text", prompt())))))
-                    .put("generationConfig", JSONObject()
-                        .put("responseMimeType", "application/json")
-                        .put("temperature", 0.2))
+                        .put("parts", JSONArray().put(audioPart).put(JSONObject().put("text", prompt(withTranscript))))))
+                    .put("generationConfig", gen)
                 val res = http("POST", "$API/v1beta/models/$model:generateContent", key, body.toString())
                 return parse(res)
             } catch (e: HttpError) {
                 lastErr = e
-                // 형식 문제(400)면 다른 MIME으로 재시도, 그 외는 바로 실패
                 if (e.code != 400) throw e
+                // 400: 생각(thinking) 설정 미지원이면 그 설정만 빼고 재시도, 아니면 다른 MIME으로
+                if (useThinkingCfg && (e.message ?: "").contains("think", ignoreCase = true)) {
+                    useThinkingCfg = false
+                } else {
+                    mi++
+                    uploadedUri = null
+                }
             }
         }
         throw lastErr ?: IllegalStateException("알 수 없는 오류")
+    }
+
+    /** 속도 최우선: 모델의 '생각' 단계를 최소화 */
+    private fun thinkingConfig(model: String): JSONObject? = when {
+        model.contains("2.5-flash") -> JSONObject().put("thinkingBudget", 0)
+        Regex("gemini-[3-9]").containsMatchIn(model) -> JSONObject().put("thinkingLevel", "low")
+        else -> null
     }
 
     private fun normalizeMime(mime: String, name: String): String = when {
@@ -219,7 +254,8 @@ object CallSummarizer {
             }
         }
         return CallSummary(
-            o.optString("summary", ""), o.optString("result", ""), o.optString("next_action", ""), t
+            o.optString("summary", ""), o.optString("result", ""), o.optString("next_action", ""), t,
+            o.optString("brand", "").trim(), o.optString("customer_name", "").trim()
         )
     }
 

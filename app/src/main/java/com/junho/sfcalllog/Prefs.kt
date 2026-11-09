@@ -73,7 +73,7 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putString("geminiAutoModel", v).apply()
 
     var saveTranscript: Boolean
-        get() = sp.getBoolean("saveTranscript", true)
+        get() = sp.getBoolean("saveTranscript", false)
         set(v) = sp.edit().putBoolean("saveTranscript", v).apply()
 
     var ignoredNumbers: Set<String>

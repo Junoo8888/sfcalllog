@@ -54,6 +54,8 @@ class LogCallActivity : Activity() {
     private lateinit var saveTranscriptBox: android.widget.CheckBox
     private var aiJob: SummaryJob? = null
     private var autoMemo: String = ""
+    private var contactName: String? = null
+    private var brandSearched = false
     private val ui = android.os.Handler(android.os.Looper.getMainLooper())
 
     private var candidates: List<Candidate> = emptyList()
@@ -68,6 +70,7 @@ class LogCallActivity : Activity() {
         if (ci == null) { finish(); return }
         info = ci
         sf = SalesforceClient(this)
+        contactName = ContactLookup.name(this, info.number)
         buildUi()
 
         if (!Prefs(this).isLoggedIn) {
@@ -102,7 +105,8 @@ class LogCallActivity : Activity() {
         val time = SimpleDateFormat("M/d HH:mm", Locale.KOREA).format(Date(info.dateMillis))
         val kind = if (info.outgoing) "발신" else "수신"
         body.addView(Ui.text(c, "세포에 통화 기록", 22f, Ui.TEXT, bold = true))
-        body.addView(Ui.text(c, "📞 ${Phone.hyphen(info.number)} · $kind · ${Ui.duration(info.durationSec)} · $time", 14f, Ui.SUB),
+        val who = contactName?.let { "$it (${Phone.hyphen(info.number)})" } ?: Phone.hyphen(info.number)
+        body.addView(Ui.text(c, "📞 $who · $kind · ${Ui.duration(info.durationSec)} · $time", 14f, Ui.SUB),
             Ui.lp(c, Ui.MATCH, Ui.WRAP, 6))
 
         // 후보 목록
@@ -282,7 +286,14 @@ class LogCallActivity : Activity() {
             aiStatus.setTextColor(Ui.RED)
             return
         }
-        aiStatus.text = "✓ 요약 완료 — 아래 메모에 넣었어요. 고칠 부분만 고치세요."
+        val sec = ((job.finishedAt - job.startedAt) / 1000).coerceAtLeast(1)
+        aiStatus.text = "✓ 요약 완료 (${sec}초)" + (if (r.brand.isNotBlank()) " · 들린 브랜드: ${r.brand}" else "") +
+            "\n아래 메모에 넣었어요. 고칠 부분만 고치세요."
+        // 아직 리드를 못 골랐으면 AI가 들은 브랜드로 자동 검색
+        if (selected == null && r.brand.length >= 2 && !brandSearched) {
+            brandSearched = true
+            autoSearch(listOf(r.brand), "🤖 AI가 들은 '${r.brand}'")
+        }
         aiStatus.setTextColor(Ui.GREEN)
         // 사용자가 메모를 직접 쓰고 있었다면 덮어쓰지 않고 뒤에 붙임
         val cur = memo.text.toString()
@@ -329,12 +340,50 @@ class LogCallActivity : Activity() {
             else -> "번호로 ${found.size}건 찾음 — 골라주세요"
         }
         renderList()
+        if (found.isEmpty() && contactName != null) {
+            val terms = ContactLookup.searchTerms(contactName!!)
+            if (terms.isNotEmpty()) {
+                autoSearch(terms, "📇 연락처 '${contactName}'")
+                return
+            }
+        }
         if (found.isEmpty()) {
             searchInput.requestFocus()
             searchInput.postDelayed({
                 getSystemService(InputMethodManager::class.java)
                     ?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
             }, 250)
+        }
+    }
+
+    /** 자동 검색: 여러 검색어를 차례로 시도해 결과를 합침 (연락처 이름·AI가 들은 브랜드) */
+    private fun autoSearch(terms: List<String>, label: String) {
+        progress.visibility = View.VISIBLE
+        listTitle.text = "$label 로 찾는 중…"
+        io.execute {
+            val merged = linkedMapOf<String, Candidate>()
+            try {
+                for (t in terms) {
+                    for (c in sf.findByName(t)) merged.putIfAbsent(c.id, c)
+                    if (merged.size >= 3) break
+                }
+            } catch (_: Exception) { }
+            val found = merged.values.sortedByDescending { it.score }.take(10)
+            runOnUiThread {
+                progress.visibility = View.GONE
+                if (found.isEmpty()) {
+                    if (candidates.isEmpty()) {
+                        listTitle.text = "$label 로도 못 찾음 — 이름을 입력하세요"
+                        renderList()
+                    }
+                    return@runOnUiThread
+                }
+                if (selected != null) return@runOnUiThread   // 그사이 사용자가 직접 골랐으면 유지
+                candidates = found
+                selected = if (found.size == 1 || (found[0].score >= 0.9 && (found.getOrNull(1)?.score ?: 0.0) < 0.9)) found[0] else null
+                listTitle.text = if (selected != null) "$label 로 찾음 — 맞나요?" else "$label 로 ${found.size}건 — 골라주세요"
+                renderList()
+            }
         }
     }
 

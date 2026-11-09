@@ -11,8 +11,8 @@ android {
         applicationId = "com.junho.sfcalllog"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
     }
 
     // 고정 서명키: 업데이트할 때 앱을 지우지 않고 덮어 설치할 수 있게 함

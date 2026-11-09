@@ -83,13 +83,16 @@ class MainActivity : Activity() {
         }
 
         // ② 권한
-        val pCard = card(body, "② 폰 권한 (4개 모두 ✓ 되어야 함)")
+        val pCard = card(body, "② 폰 권한 (모두 ✓ 되어야 함)")
         permRow(pCard, "전화 상태 · 통화기록 읽기",
             granted(Manifest.permission.READ_PHONE_STATE) && granted(Manifest.permission.READ_CALL_LOG)) {
             requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG), 1)
         }
         permRow(pCard, "다른 앱 위에 표시 (팝업)", Settings.canDrawOverlays(c)) {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        }
+        permRow(pCard, "연락처 읽기 (저장된 이름으로 브랜드 추정)", granted(Manifest.permission.READ_CONTACTS)) {
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 4)
         }
         val notifOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted(Manifest.permission.POST_NOTIFICATIONS)
         permRow(pCard, "알림 (팝업이 막힐 때 대신 알림)", notifOk) {
@@ -148,6 +151,14 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, on -> prefs.aiEnabled = on }
         }
         aCard.addView(aiSw, Ui.lp(c, Ui.MATCH, Ui.WRAP, 10))
+        val trSw = Switch(c).apply {
+            text = "대화록(나/고객)도 만들기 — 느려짐"
+            textSize = 14f
+            isChecked = prefs.saveTranscript
+            setOnCheckedChangeListener { _, on -> prefs.saveTranscript = on }
+        }
+        aCard.addView(trSw, Ui.lp(c, Ui.MATCH, Ui.WRAP, 6))
+        aCard.addView(Ui.text(c, "끄면 요약만 빠르게 (권장). 켜면 화자 구분 대화록까지 세포에 저장.", 12f, Ui.SUB), Ui.lp(c, Ui.MATCH, Ui.WRAP, 2))
         aCard.addView(Ui.button(c, "저장하고 연결 테스트") { btn ->
             prefs.geminiKey = gKey.text.toString()
             prefs.geminiModel = gModel.text.toString()

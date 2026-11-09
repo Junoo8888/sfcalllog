@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 연락처 이름으로 브랜드 추정 -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- 통화 녹음 파일 읽기 (AI 요약용) -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
