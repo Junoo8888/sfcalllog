@@ -31,7 +31,7 @@ class Prefs(context: Context) {
 
     var refreshToken: String
         get() = sp.getString("refreshToken", "") ?: ""
-        set(v) = sp.edit().putString("refreshToken", v).apply()
+        set(v) = sp.edit().putString("refreshToken", v).commit().let { }
 
     var instanceUrl: String
         get() = sp.getString("instanceUrl", "") ?: ""

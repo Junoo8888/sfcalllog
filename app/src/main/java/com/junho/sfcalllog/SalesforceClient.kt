@@ -72,7 +72,14 @@ class SalesforceClient(context: Context) {
         }
     }
 
-    private fun refreshAccessToken() {
+    private fun refreshAccessToken() = synchronized(REFRESH_LOCK) {
+        // 다른 화면이 막 갱신했으면 그 토큰을 그대로 사용 (토큰 교체 충돌 방지)
+        if (System.currentTimeMillis() - lastRefreshAt < 5000 && prefs.accessToken.isNotEmpty()) return@synchronized
+        doRefresh()
+        lastRefreshAt = System.currentTimeMillis()
+    }
+
+    private fun doRefresh() {
         if (prefs.refreshToken.isEmpty()) throw SfException("세일즈포스 로그인이 필요합니다.")
         val form = mutableMapOf(
             "grant_type" to "refresh_token",
@@ -88,6 +95,8 @@ class SalesforceClient(context: Context) {
         }
         prefs.accessToken = json.getString("access_token")
         json.optString("instance_url", "").takeIf { it.isNotEmpty() }?.let { prefs.instanceUrl = it }
+        // Refresh Token Rotation: 갱신할 때마다 새 refresh_token이 오면 반드시 교체 저장
+        json.optString("refresh_token", "").takeIf { it.isNotEmpty() }?.let { prefs.refreshToken = it }
     }
 
     // ───────────── 데이터 API ─────────────
@@ -331,6 +340,8 @@ class SalesforceClient(context: Context) {
 
     companion object {
         const val API_VERSION = "v60.0"
+        private val REFRESH_LOCK = Any()
+        @Volatile private var lastRefreshAt = 0L
 
         fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
